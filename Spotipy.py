@@ -19,7 +19,7 @@ sp = spotipy.Spotify(
     requests_timeout=10  # 10-second timeout for all requests
 )
 
-CSV_FILE = "adjacency_list.csv"
+CSV_FILE = "adjacency_list original.csv"
 
 
 def safe_request(func, *args, **kwargs):
@@ -134,7 +134,6 @@ def make_bidirectional_connections(adjacency_list, artist_url, related_urls):
         adjacency_list (dict): Current adjacency list.
         artist_url (str): URL of the artist whose connections are being updated.
         related_urls (list): List of related artist URLs to be added bidirectionally.
-
     Returns:
         dict: Updated adjacency list with bidirectional connections.
     """
@@ -176,51 +175,84 @@ def find_related_artists(artist_url):
     adjacency_list[artist_url] = list(featured_urls)
 
     # Make connections bidirectional
-    adjacency_list = make_bidirectional_connections(adjacency_list, artist_url, list(featured_urls))
+    # blows up my code :(
+    #adjacency_list = make_bidirectional_connections(adjacency_list, artist_url, list(featured_urls))
 
     write_adjacency_list(adjacency_list)
 
     return list(featured_urls)
 
-def breadth_first(starting_url, ending_url):
+
+def find_related_artists_in_memory(adjacency_list, artist_url):
     """
-    Uses BFS to find the shortest path between two artists.
+    Operates on the adjacency list in memory instead of in the CSV for faster access times.
+    Pulls from Spotify API if the artist is not found in memory and updates the adjacency list.
 
     Args:
-        starting_url (str): Spotify URL of the starting artist.
-        ending_url (str): Spotify URL of the ending artist.
+        adjacency_list (dict): The adjacency list in memory.
+        artist_url (str): The Spotify URL of the artist.
 
     Returns:
-        list: Path of artist URLs from start to end, or None if no connection.
+        list: Related artist URLs.
     """
+    # Check if the artist URL exists in the adjacency list
+    if artist_url in adjacency_list:
+        return adjacency_list[artist_url]
+
+    # If not found, fetch related artists from Spotify API
+    print(f"Artist {artist_url} not found in memory. Fetching from Spotify API...")
+    related_urls = find_related_artists(artist_url)  # This will also update the CSV and adjacency list
+
+    # Update the adjacency list in memory
+    adjacency_list[artist_url] = related_urls
+
+    return related_urls
+
+
+def breadth_first(starting_url, ending_url):
+    """
+    Finds the shortest path between two artists using BFS.
+    Tracks the number of artists (nodes) searched.
+
+    Args:
+        starting_url (str): URL of the starting artist.
+        ending_url (str): URL of the ending artist.
+
+    Returns:
+        list: A list containing:
+            - The degree of separation between the artists.
+            - The number of artists searched.
+            - The shortest path as a list of URLs.
+    """
+    adjacency_list = read_adjacency_list()  # Load adjacency list once
     url_counter = 0
     queue = [(starting_url, [starting_url])]
     visited = set()
 
-
     while queue:
         current_url, path = queue.pop(0)
-
         url_counter += 1
 
-        print(current_url)
-
+        # If we find the target artist, return the result
         if current_url == ending_url:
-            return [len(path) - 1] + path
+            return [len(path) - 1, url_counter] + path
 
         if current_url not in visited:
             visited.add(current_url)
-            neighbors = find_related_artists(current_url)
+            neighbors = find_related_artists_in_memory(adjacency_list, current_url)
 
-            # Check if ending_url is in neighbors
+            # Check if the ending URL is directly among neighbors
             if ending_url in neighbors:
-                return [len(path)] + [str(url_counter)] + path + [ending_url]
+                return [len(path), url_counter] + path + [ending_url]
 
+            # Add unvisited neighbors to the queue
             for neighbor in neighbors:
                 if neighbor not in visited:
                     queue.append((neighbor, path + [neighbor]))
 
+    # If no path is found, return None
     return None
+ # nonlocal to avoid wipe in recursion. Keeps it in the scope of the beginnging function
 def depth_first(starting_url, ending_url):
     """
     Uses DFS to find any path between two artists
@@ -245,7 +277,7 @@ def depth_first(starting_url, ending_url):
         Returns:
             list: Path of artist URLs from start to end, or None if no connection.
         """
-        nonlocal url_counter
+        nonlocal url_counter # nonlocal to avoid wipe in recursion. Keeps it in the scope of the beginnging function
         url_counter += 1
         visited.add(current_url)
         path.append(current_url)
@@ -280,6 +312,11 @@ def main():
     artist_name_1 = input("Enter the first artist name: ").strip()
     artist_name_2 = input("Enter the second artist name: ").strip()
 
+    print("\nChoose a search method:")
+    print("1. Breadth-First Search (BFS)")
+    print("2. Depth-First Search (DFS)")
+    choice = input("Enter your choice (1 or 2): ").strip()
+
     start_url = get_artist_url(artist_name_1)
     end_url = get_artist_url(artist_name_2)
 
@@ -287,10 +324,7 @@ def main():
         print("Could not find one or both artists. Exiting.")
         return
 
-    print("\nChoose a search method:")
-    print("1. Breadth-First Search (BFS)")
-    print("2. Depth-First Search (DFS)")
-    choice = input("Enter your choice (1 or 2): ").strip()
+
 
     if choice == "1":
         print(f"\nFinding shortest path between {artist_name_1} and {artist_name_2} using BFS...")
